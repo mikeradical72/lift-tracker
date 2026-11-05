@@ -178,6 +178,25 @@ textarea.inp{height:auto;min-height:46px;padding:12px 14px;resize:none;font-size
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .sp{height:8px}
 hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
+
+/* rest timer */
+.rt{position:fixed;left:0;right:0;bottom:calc(var(--sab) + 66px);z-index:29;padding:0 calc(var(--sar) + 12px) 0 calc(var(--sal) + 12px);pointer-events:none}
+.rt .in{max-width:640px;margin:0 auto;pointer-events:auto;display:flex;align-items:center;gap:8px;padding:8px;border-radius:var(--r);background:rgba(20,24,30,.94);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid var(--line2);box-shadow:0 10px 30px -10px rgba(0,0,0,.7);transition:background .2s,border-color .2s}
+.rt .tm{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;line-height:1}
+.rt .tm b{font-size:32px;font-weight:800;letter-spacing:-.02em}
+.rt .tm span{font-size:10px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-top:3px}
+.rt .adj{width:46px;height:52px;border-radius:13px;background:var(--bg2);border:1px solid var(--line2);font-weight:800;font-size:13px;color:var(--muted)}
+.rt .go{height:56px;min-width:104px;padding:0 16px;border-radius:14px;font-weight:800;font-size:18px;background:var(--accent);color:var(--accentInk);box-shadow:0 6px 24px -8px rgba(196,242,74,.55)}
+.rt .rs{width:46px;height:52px;border-radius:13px;background:var(--bg2);border:1px solid var(--line2);color:var(--muted);display:grid;place-items:center}
+.rt .rs svg{width:20px;height:20px}
+.rt button:active{transform:scale(.95)}
+.rt.run .tm b{color:var(--accent)}
+.rt.paused .tm b{color:var(--gold)}
+.rt.done .in{background:var(--accent);border-color:transparent;animation:rtp .8s ease-in-out infinite alternate}
+.rt.done .tm b,.rt.done .tm span{color:var(--accentInk)}
+.rt.done .go{background:var(--accentInk);color:var(--accent)}
+@keyframes rtp{from{box-shadow:0 0 0 0 rgba(196,242,74,.6)}to{box-shadow:0 0 0 10px rgba(196,242,74,0)}}
+main{padding-bottom:calc(var(--sab) + 170px)}
 </style>
 </head>
 <body>
@@ -189,6 +208,13 @@ hr.sep{border:0;border-top:1px solid var(--line);margin:14px 0}
   <button data-tab="progress"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 20h18M5 16l4.5-5 3.5 3 6-7"/><path d="M15 7h4v4"/></svg>Progress</button>
   <button data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>Setup</button>
 </nav>
+<div class="rt" id="rt"><div class="in">
+  <button class="adj" id="rtM" aria-label="Minus 30 seconds">−30</button>
+  <div class="tm"><b class="num" id="rtT">2:00</b><span id="rtL">Rest timer</span></div>
+  <button class="adj" id="rtP" aria-label="Plus 30 seconds">+30</button>
+  <button class="rs" id="rtR" aria-label="Reset"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.5-5.8M4 4v4.5h4.5"/></svg></button>
+  <button class="go" id="rtG">Start</button>
+</div></div>
 <div class="toast" id="toast"></div>
 <input type="file" id="file" accept="application/json,.json" hidden>
 
@@ -618,6 +644,45 @@ $('#file').onchange=async e=>{
 
 window.addEventListener('scroll',()=>$('#top').classList.toggle('scrolled',window.scrollY>4),{passive:true});
 window.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&tab==='today'&&!document.activeElement.matches('input,textarea'))render();});
+
+/* ---------- rest timer (own key; does not touch workout data) ---------- */
+(function(){
+  const RK='liftlog.restTimer.v1';
+  let dur=120,end=0,left=0,state='idle',ac=null,tick=null,beeped=false;
+  try{const r=JSON.parse(localStorage.getItem(RK));if(r&&r.dur>=15&&r.dur<=1800)dur=r.dur;}catch(e){}
+  const persist=()=>{try{localStorage.setItem(RK,JSON.stringify({dur,end:state==='run'?end:0}));}catch(e){}};
+  try{const r=JSON.parse(localStorage.getItem(RK));if(r&&r.end>Date.now()){end=r.end;state='run';}}catch(e){}
+  const el=$('#rt'),T=$('#rtT'),L=$('#rtL'),G=$('#rtG');
+  const fm=s=>{s=Math.max(0,Math.ceil(s));return Math.floor(s/60)+':'+pad(s%60);};
+  function beep(){try{if(!ac)return;const t=ac.currentTime;[0,.25,.5].forEach(o=>{const g=ac.createGain(),os=ac.createOscillator();os.type='sine';os.frequency.value=880;g.gain.setValueAtTime(.0001,t+o);g.gain.exponentialRampToValueAtTime(.4,t+o+.02);g.gain.exponentialRampToValueAtTime(.0001,t+o+.18);os.connect(g);g.connect(ac.destination);os.start(t+o);os.stop(t+o+.2);});}catch(e){}}
+  function finish(){state='done';persist();if(!beeped){beeped=true;try{navigator.vibrate&&navigator.vibrate([300,120,300,120,300]);}catch(e){}beep();}}
+  function draw(){
+    if(state==='run'&&end-Date.now()<=0)finish();
+    const rem=state==='run'?(end-Date.now())/1000:state==='paused'?left:dur;
+    T.textContent=state==='done'?'Go!':fm(rem);
+    L.textContent=state==='run'?'Resting':state==='paused'?'Paused':state==='done'?'Next set':'Rest '+fm(dur);
+    G.textContent=state==='run'?'Pause':state==='paused'?'Resume':state==='done'?'Again':'Start';
+    el.className='rt '+state;
+    clearInterval(tick);if(state==='run')tick=setInterval(draw,250);
+  }
+  function unlock(){try{if(!ac){const C=window.AudioContext||window.webkitAudioContext;if(C)ac=new C();}if(ac&&ac.state==='suspended')ac.resume();
+    if(ac){const b=ac.createBuffer(1,1,22050),s=ac.createBufferSource();s.buffer=b;s.connect(ac.destination);s.start(0);}}catch(e){}}
+  G.onclick=()=>{unlock();vib();
+    if(state==='run'){left=Math.max(0,(end-Date.now())/1000);state='paused';}
+    else if(state==='paused'){end=Date.now()+left*1000;state='run';}
+    else{end=Date.now()+dur*1000;state='run';beeped=false;}
+    persist();draw();};
+  $('#rtR').onclick=()=>{vib();state='idle';end=0;beeped=false;persist();draw();};
+  function adj(d){vib();
+    if(state==='run'){end=Math.max(Date.now()+1000,end+d*1000);}
+    else if(state==='paused'){left=Math.max(1,left+d);}
+    else{dur=Math.min(1800,Math.max(15,dur+d));state='idle';beeped=false;}
+    persist();draw();}
+  $('#rtM').onclick=()=>adj(-30);$('#rtP').onclick=()=>adj(30);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')draw();});
+  window.__restTimer={draw,get state(){return state;}};
+  draw();
+})();
 render();
 if('serviceWorker' in navigator&&location.protocol!=='file:')window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 </script>
